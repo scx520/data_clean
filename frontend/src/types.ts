@@ -47,8 +47,11 @@ export interface RuleStat {
   name: string
   changes: number
   issues: number
+  fields?: string[]
+  removed_rows?: number
 }
 export interface Result {
+  preview_id: string
   rows: Row[]
   columns: string[]
   changes: Change[]

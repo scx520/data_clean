@@ -157,8 +157,29 @@ def prepared(identity, request):
 def preview(identity: str, request: RunRequest):
     _, data, rules = prepared(identity, request)
     result = clean(data["rows"], data["columns"], rules)
-    return {**result, "rows": result["rows"][:200], "changes": result["changes"][:500], "issues": result["issues"][:500],
+    preview_id = store.save_preview(result)
+    return {**result, "preview_id": preview_id, "rows": result["rows"][:200], "changes": result["changes"][:500], "issues": result["issues"][:500],
             "total_changes": len(result["changes"]), "total_issues": len(result["issues"])}
+
+
+def paginated_result(data, page, page_size, view, search):
+    if page < 1 or page_size < 1 or page_size > 200:
+        raise HTTPException(400, "分页参数无效")
+    items = data[view]
+    if search:
+        items = [r for r in items if any(search.casefold() in str(v).casefold() for v in r.values())]
+    return {"items": items[(page - 1) * page_size:page * page_size], "total": len(items),
+            "columns": data["columns"], "before": data["before"], "after": data["after"]}
+
+
+@app.get("/api/previews/{identity}")
+def preview_result(identity: str, page: int = 1, page_size: int = 50,
+                   view: Literal["rows", "changes", "issues"] = "rows", search: str = ""):
+    try:
+        result = store.read_preview(identity)
+    except FileNotFoundError as error:
+        raise HTTPException(404, "预览不存在或已过期，请重新点击预览效果") from error
+    return paginated_result(result, page, page_size, view, search)
 
 
 def execute_task(identity, data, rules):
@@ -201,13 +222,8 @@ def task_result(identity: str, page: int = 1, page_size: int = 50, view: Literal
     record = task(identity)
     if record["status"] != "success":
         raise HTTPException(409, "任务尚未成功完成")
-    if page < 1 or page_size < 1 or page_size > 200:
-        raise HTTPException(400, "分页参数无效")
     data = store.read_json("results", identity)
-    items = data[view]
-    if search:
-        items = [r for r in items if any(search.casefold() in str(v).casefold() for v in r.values())]
-    return {"items": items[(page - 1) * page_size:page * page_size], "total": len(items), "columns": data["columns"], "before": data["before"], "after": data["after"]}
+    return paginated_result(data, page, page_size, view, search)
 
 
 def csv_stream(rows, columns):

@@ -106,11 +106,57 @@ def test_preview_is_limited_but_saved_results_are_complete(client):
     preview = client.post(f"/api/datasets/{identity}/preview", json=body).json()
     assert len(preview["rows"]) == 200
     assert preview["after"]["rows"] == 240
+    preview_id = preview["preview_id"]
+    page = client.get(f"/api/previews/{preview_id}?page=5&page_size=50").json()
+    assert page["total"] == 240
+    assert len(page["items"]) == 40
+    assert page["items"][-1]["_row_id"] == 240
+    filtered = client.get(f"/api/previews/{preview_id}?search=0239").json()
+    assert filtered["total"] == 1
+    assert filtered["items"][0]["_row_id"] == 240
     task_id = client.post(f"/api/datasets/{identity}/tasks", json=body).json()["id"]
     result = client.get(f"/api/tasks/{task_id}/result?page=5&page_size=50").json()
     assert len(result["items"]) == 40
     assert result["total"] == 240
     assert result["items"][-1]["_row_id"] == 240
+
+
+def test_preview_dedupe_reports_all_removed_rows_and_selected_fields(client):
+    text = "记录编号,客户经理\n" + "\n".join(f"{i:05d},经理{i % 581:03d}" for i in range(9556))
+    identity = upload_csv(client, text).json()["id"]
+    no_change = client.post(f"/api/datasets/{identity}/preview", json={"rules": [{"id": "dedupe", "type": "dedupe"}]}).json()
+    assert no_change["after"]["rows"] == 9556
+    assert no_change["total_changes"] == 0
+    assert client.get(f"/api/previews/{no_change['preview_id']}").json()["total"] == 9556
+    preview = client.post(f"/api/datasets/{identity}/preview", json={"rules": [{"id": "dedupe", "type": "dedupe", "fields": ["客户经理"]}]}).json()
+    assert preview["before"]["rows"] == 9556
+    assert preview["after"]["rows"] == 581
+    assert preview["total_changes"] == 8975
+    assert preview["rule_stats"][0]["fields"] == ["客户经理"]
+    assert preview["rule_stats"][0]["removed_rows"] == 8975
+    data = client.get(f"/api/previews/{preview['preview_id']}?view=changes&page=12").json()
+    assert data["total"] == 8975
+    assert len(data["items"]) == 50
+    assert data["items"][0]["row_id"] == 1132
+    assert client.get(f"/api/previews/{preview['preview_id']}?view=changes&search=9556").json()["total"] == 1
+    assert client.get(f"/api/datasets/{identity}").json()["total"] == 9556
+
+
+def test_preview_expiry_invalid_ids_and_pagination(client):
+    import os
+    import time
+
+    identity = client.get("/api/datasets").json()[0]["id"]
+    preview = client.post(f"/api/datasets/{identity}/preview", json={"rules": [{"id": "trim", "type": "trim"}]}).json()
+    preview_id = preview["preview_id"]
+    assert client.get(f"/api/previews/{preview_id}?page=0").status_code == 400
+    assert client.get("/api/previews/not-a-preview").status_code == 404
+    assert client.get(f"/api/previews/{'0' * 32}").status_code == 404
+    target = store.ROOT / "previews" / f"{preview_id}.json"
+    old = time.time() - store.PREVIEW_TTL_SECONDS - 10
+    os.utime(target, (old, old))
+    assert client.get(f"/api/previews/{preview_id}").status_code == 404
+    assert not target.exists()
 
 
 def test_restart_marks_interrupted_tasks_and_does_not_reseed(client):

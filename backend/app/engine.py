@@ -68,6 +68,7 @@ def clean(source: list[dict], columns: list[str], rules: list[dict]) -> dict:
         fields = rule.get("fields") or columns
         options = rule.get("options", {})
         start_changes, start_issues = len(changes), len(issues)
+        start_rows = len(rows)
         name = RULE_NAMES[kind]
         if kind == "dedupe":
             seen, kept = set(), []
@@ -112,7 +113,9 @@ def clean(source: list[dict], columns: list[str], rules: list[dict]) -> dict:
                     if before != after:
                         row[field] = after
                         changes.append({"row_id": row["_row_id"], "field": field, "before": before, "after": after, "rule": name, "action": "update"})
-        rule_stats.append({"index": index + 1, "name": name, "changes": len(changes) - start_changes, "issues": len(issues) - start_issues})
+        rule_stats.append({"index": index + 1, "name": name, "fields": list(fields),
+                           "changes": len(changes) - start_changes, "issues": len(issues) - start_issues,
+                           "removed_rows": start_rows - len(rows)})
     return {"rows": rows, "columns": columns, "changes": changes, "issues": issues,
             "before": quality(source, columns), "after": quality(rows, columns), "rule_stats": rule_stats,
             "executed_at": datetime.now().astimezone().isoformat()}

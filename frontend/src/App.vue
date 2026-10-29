@@ -156,39 +156,11 @@ const isRunning = computed(() => ['preview', 'run', 'upload'].includes(busy.valu
 const hasResult = computed(() => !!preview.value || !!completedTask.value)
 const resultIsSaved = computed(() => !!completedTask.value)
 const visibleRows = computed(() =>
-  tab.value === 'original'
-    ? rawRows.value
-    : completedTask.value
-      ? (resultItems.value as Row[])
-      : (preview.value?.rows || [])
-          .filter(rowMatches)
-          .slice((pageNumber.value - 1) * 50, pageNumber.value * 50),
+  tab.value === 'original' ? rawRows.value : (resultItems.value as Row[]),
 )
-const visibleChanges = computed(() =>
-  completedTask.value
-    ? (resultItems.value as Change[])
-    : (preview.value?.changes || [])
-        .filter(rowMatches)
-        .slice((pageNumber.value - 1) * 50, pageNumber.value * 50),
-)
-const visibleIssues = computed(() =>
-  completedTask.value
-    ? (resultItems.value as Issue[])
-    : (preview.value?.issues || [])
-        .filter(rowMatches)
-        .slice((pageNumber.value - 1) * 50, pageNumber.value * 50),
-)
-const shownTotal = computed(() => {
-  if (tab.value === 'original') return rawTotal.value
-  if (completedTask.value) return resultTotal.value
-  const items =
-    tab.value === 'preview'
-      ? preview.value?.rows
-      : tab.value === 'changes'
-        ? preview.value?.changes
-        : preview.value?.issues
-  return (items || []).filter(rowMatches).length
-})
+const visibleChanges = computed(() => resultItems.value as Change[])
+const visibleIssues = computed(() => resultItems.value as Issue[])
+const shownTotal = computed(() => (tab.value === 'original' ? rawTotal.value : resultTotal.value))
 const totalPages = computed(() => Math.max(1, Math.ceil(shownTotal.value / 50)))
 const changeCount = computed(
   () => completedTask.value?.summary?.changes ?? preview.value?.total_changes ?? 0,
@@ -196,21 +168,11 @@ const changeCount = computed(
 const issueCount = computed(
   () => completedTask.value?.summary?.issues ?? preview.value?.total_issues ?? 0,
 )
-const previewLimited = computed(
-  () =>
-    !completedTask.value &&
-    preview.value &&
-    ((tab.value === 'preview' && preview.value.after.rows > 200) ||
-      (tab.value === 'changes' && preview.value.total_changes > 500) ||
-      (tab.value === 'issues' && preview.value.total_issues > 500)),
+const resultSummary = computed(() => completedTask.value?.summary || preview.value)
+const removedRowCount = computed(() =>
+  resultSummary.value ? resultSummary.value.before.rows - resultSummary.value.after.rows : 0,
 )
-
-function rowMatches(row: object) {
-  return (
-    !search.value ||
-    Object.values(row).some((v) => String(v).toLowerCase().includes(search.value.toLowerCase()))
-  )
-}
+const modifiedCellCount = computed(() => changeCount.value - removedRowCount.value)
 function notify(text: string, error = false) {
   toast.value = { text, error }
   clearTimeout(toastTimer)
@@ -331,13 +293,16 @@ async function loadOriginal() {
   }
 }
 async function loadResult() {
-  if (!completedTask.value || tab.value === 'original') return
+  if (!hasResult.value || tab.value === 'original') return
   const revision = ++resultRevision
   loading.value = true
   try {
     const view = tab.value === 'preview' ? 'rows' : tab.value
+    const endpoint = completedTask.value
+      ? `/tasks/${completedTask.value.id}/result`
+      : `/previews/${preview.value!.preview_id}`
     const data = await api<{ items: (Row | Change | Issue)[]; total: number }>(
-      `/tasks/${completedTask.value.id}/result?view=${view}&page=${pageNumber.value}&search=${encodeURIComponent(search.value)}`,
+      `${endpoint}?view=${view}&page=${pageNumber.value}&search=${encodeURIComponent(search.value)}`,
     )
     if (revision !== resultRevision) return
     resultItems.value = data.items
@@ -367,7 +332,7 @@ async function selectDataset(identity: string, retainRules = false) {
 }
 async function updateTable() {
   if (tab.value === 'original') await loadOriginal()
-  else if (completedTask.value) await loadResult()
+  else if (hasResult.value) await loadResult()
 }
 function setTab(value: typeof tab.value) {
   if (value !== 'original' && !hasResult.value) return
@@ -375,6 +340,14 @@ function setTab(value: typeof tab.value) {
   pageNumber.value = 1
   search.value = ''
   resultItems.value = []
+  resultTotal.value =
+    value === 'preview'
+      ? resultSummary.value?.after.rows || 0
+      : value === 'changes'
+        ? changeCount.value
+        : value === 'issues'
+          ? issueCount.value
+          : 0
   void updateTable()
 }
 function goPage(value: number) {
@@ -434,7 +407,7 @@ async function makePreview() {
     completedTask.value = null
     setTab('preview')
     notify(
-      `预览完成：${number(result.total_changes)} 处变更，${number(result.total_issues)} 项异常`,
+      `预览完成：${number(result.before.rows)} → ${number(result.after.rows)} 行，移除 ${number(result.before.rows - result.after.rows)} 行，${number(result.total_changes)} 处变更，${number(result.total_issues)} 项异常`,
     )
   } catch (error) {
     notify(errorMessage(error), true)
@@ -865,11 +838,54 @@ onUnmounted(() => {
                     <X :size="12" /></button
                 ></label>
               </div>
-              <div v-if="previewLimited" class="preview-notice">
-                <Info :size="14" />预览展示前
-                {{
-                  tab === 'preview' ? '200 行数据' : '500 条记录'
-                }}；执行清洗后可查看和导出完整结果。
+              <div v-if="resultSummary && tab !== 'original'" class="result-summary">
+                <div class="result-summary-counts">
+                  <span
+                    >原始 <strong>{{ number(resultSummary.before.rows) }}</strong> 行</span
+                  >
+                  <ArrowRight :size="14" />
+                  <span
+                    >{{ resultIsSaved ? '清洗后' : '预览结果' }}
+                    <strong>{{ number(resultSummary.after.rows) }}</strong> 行</span
+                  >
+                  <span class="summary-detail"
+                    >移除 {{ number(removedRowCount) }} 行 · 修改
+                    {{ number(modifiedCellCount) }} 个单元格</span
+                  >
+                </div>
+                <p>
+                  {{
+                    resultIsSaved
+                      ? '完整结果支持分页查看和搜索。'
+                      : '已对全部原始数据计算，完整预览支持分页查看和搜索；执行清洗后保存结果。'
+                  }}
+                </p>
+                <p v-if="!changeCount" class="zero-change-hint">
+                  本次没有产生变更，可展开下方明细核对实际执行的字段。
+                </p>
+                <details class="execution-details">
+                  <summary>
+                    本次实际执行 {{ resultSummary.rule_stats.length }} 条规则 · 查看字段与处理明细
+                  </summary>
+                  <div
+                    v-for="stat in resultSummary.rule_stats"
+                    :key="stat.index"
+                    class="execution-rule"
+                  >
+                    <strong>{{ stat.index }}. {{ stat.name }}</strong>
+                    <span
+                      >处理字段：{{
+                        stat.fields?.join('、') || '历史任务未记录字段，请查看规则配置'
+                      }}</span
+                    >
+                    <span
+                      >{{ stat.changes }} 处变更<span v-if="stat.removed_rows !== undefined">
+                        · 移除 {{ stat.removed_rows }} 行</span
+                      >
+                      · {{ stat.issues }} 项异常</span
+                    >
+                  </div>
+                </details>
               </div>
               <div class="table-container" :class="{ 'table-loading': loading }">
                 <table v-if="tab === 'original' || tab === 'preview'" class="data-table">
@@ -972,7 +988,7 @@ onUnmounted(() => {
               </div>
               <div class="table-footer">
                 <span
-                  >共 <strong>{{ number(shownTotal) }}</strong> 条{{
+                  >{{ search ? '匹配' : '共' }} <strong>{{ number(shownTotal) }}</strong> 条{{
                     tab === 'original' || tab === 'preview' ? '数据' : '记录'
                   }}<span v-if="shownTotal" class="footer-range"
                     >展示 {{ (pageNumber - 1) * 50 + 1 }}–{{
@@ -1040,9 +1056,10 @@ onUnmounted(() => {
                       <span class="rule-order">{{ String(index + 1).padStart(2, '0') }}</span
                       ><span class="rule-name"
                         >{{ ruleMeta(rule.type).title
-                        }}<small>{{
-                          rule.fields.length ? rule.fields.join('、') : '全部字段'
-                        }}</small></span
+                        }}<small
+                          >{{ rule.enabled ? '已启用' : '已停用' }} ·
+                          {{ rule.fields.length ? rule.fields.join('、') : '全部字段' }}</small
+                        ></span
                       ><ChevronDown
                         :size="14"
                         :class="{ rotated: expandedRule === rule.id }"
@@ -1071,6 +1088,7 @@ onUnmounted(() => {
                         :key="field"
                         :disabled="isRunning"
                         :class="['field-chip', { chosen: rule.fields.includes(field) }]"
+                        :aria-pressed="rule.fields.includes(field)"
                         @click="toggleField(rule, field)"
                       >
                         <Check v-if="rule.fields.includes(field)" :size="11" />{{ field }}</button
@@ -1138,7 +1156,11 @@ onUnmounted(() => {
                       <p class="config-hint">仅标记异常，不修改或删除数据。</p></template
                     >
                     <p v-if="rule.type === 'dedupe'" class="config-hint">
-                      字段内容完全一致时，保留首次出现的记录。
+                      {{
+                        rule.fields.length
+                          ? `仅按「${rule.fields.join('、')}」判重，其他字段即使不同，也只保留第一条。`
+                          : `按全部 ${columns.length} 个字段联合判重，所有字段都一致才会移除重复行。`
+                      }}
                     </p>
                     <p v-if="rule.type === 'trim'" class="config-hint">
                       清理文本两端的空格、换行和制表符。

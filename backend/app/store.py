@@ -2,11 +2,13 @@
 import json
 import os
 import sqlite3
+import time
 from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
 ROOT = Path(os.environ.get("DATA_CLEAN_HOME", Path(__file__).resolve().parents[2] / ".data"))
+PREVIEW_TTL_SECONDS = 24 * 60 * 60
 
 
 def now():
@@ -38,6 +40,33 @@ def read_json(folder, identity):
     return json.loads((ROOT / folder / f"{identity}.json").read_text(encoding="utf-8"))
 
 
+def expire_previews():
+    cutoff = time.time() - PREVIEW_TTL_SECONDS
+    for path in (ROOT / "previews").glob("*.json"):
+        try:
+            if path.stat().st_mtime < cutoff:
+                path.unlink(missing_ok=True)
+        except FileNotFoundError:
+            continue
+
+
+def save_preview(result):
+    expire_previews()
+    identity = uuid4().hex
+    write_json("previews", identity, result)
+    return identity
+
+
+def read_preview(identity):
+    if len(identity) != 32 or any(c not in "0123456789abcdef" for c in identity):
+        raise FileNotFoundError
+    target = ROOT / "previews" / f"{identity}.json"
+    if target.stat().st_mtime < time.time() - PREVIEW_TTL_SECONDS:
+        target.unlink(missing_ok=True)
+        raise FileNotFoundError
+    return read_json("previews", identity)
+
+
 def add_dataset(name, columns, rows, source="import"):
     identity = uuid4().hex
     write_json("datasets", identity, {"columns": columns, "rows": rows})
@@ -46,8 +75,9 @@ def add_dataset(name, columns, rows, source="import"):
 
 
 def initialize():
-    for folder in ("datasets", "results"):
+    for folder in ("datasets", "results", "previews"):
         (ROOT / folder).mkdir(parents=True, exist_ok=True)
+    expire_previews()
     with connect() as db:
         db.executescript("""
         CREATE TABLE IF NOT EXISTS datasets (

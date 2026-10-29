@@ -1071,7 +1071,7 @@ small {
   transition: transform 0.2s;
 }
 .toggle.on {
-  background: #7d98a8;
+  background: var(--primary);
 }
 .toggle.on span {
   transform: translateX(11px);
@@ -1113,9 +1113,9 @@ small {
   transition: all 0.15s;
 }
 .field-chip.chosen {
-  color: #497087;
-  border-color: #bed0db;
-  background: #edf3f6;
+  color: #fff;
+  border-color: var(--primary);
+  background: var(--primary);
 }
 .field-chip:hover:enabled {
   border-color: #8aa8b9;
@@ -1780,14 +1780,65 @@ small {
 .table-empty p {
   font-size: 10px;
 }
-.preview-notice {
+.result-summary {
+  background: #f0f7fc;
+  border-top: 1px solid #e0edf6;
+  border-bottom: 1px solid #e0edf6;
+  padding: 12px 17px;
+  color: #52758f;
+}
+.result-summary-counts {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 7px;
-  background: #f0f6fa;
-  padding: 9px 16px;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.8;
+}
+.result-summary-counts strong {
+  color: var(--primary-dark);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.summary-detail {
+  color: #7892a5;
+  margin-left: auto;
+  font-size: 10px;
+}
+.result-summary > p {
+  margin-top: 5px;
   font-size: 9px;
-  color: #839ead;
+  color: #7892a5;
+  line-height: 1.8;
+}
+.result-summary > p.zero-change-hint {
+  color: #927641;
+}
+.execution-details {
+  margin-top: 8px;
+  font-size: 10px;
+}
+.execution-details summary {
+  color: var(--primary-dark);
+  cursor: pointer;
+  line-height: 1.9;
+}
+.execution-rule {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 0;
+  border-top: 1px solid #e0edf6;
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+.execution-rule strong {
+  font-size: 10px;
+  font-weight: 500;
+}
+.execution-rule > span {
+  color: #7892a5;
+  font-size: 9px;
 }
 .modal-overlay {
   position: fixed;
