@@ -756,9 +756,9 @@ onUnmounted(() => {
             </div>
             <div class="metric quality-metric">
               <span class="metric-label"
-                >数据完整性评分<span class="metric-icon green"><ShieldCheck :size="18" /></span
+                >数据完整性评分<span class="metric-icon brand-blue"><ShieldCheck :size="18" /></span
               ></span>
-              <div class="metric-value teal">
+              <div class="metric-value brand-color">
                 {{ currentQuality?.score ?? '—' }}<small>/ 100</small>
               </div>
               <div class="score-track">
@@ -837,7 +837,9 @@ onUnmounted(() => {
               </div>
               <div class="table-options">
                 <div class="table-caption">
-                  <span :class="['mini-dot', tab === 'original' ? 'teal-dot' : 'blue-dot']"></span
+                  <span
+                    :class="['mini-dot', tab === 'original' ? 'primary-dot' : 'blue-dot']"
+                  ></span
                   >{{
                     tab === 'original'
                       ? '原始数据视图'
@@ -1184,7 +1186,7 @@ onUnmounted(() => {
               </div>
               <div class="rules-panel-footer">
                 <span class="enabled-caption"
-                  ><span class="mini-dot teal-dot"></span>已启用 {{ enabledCount }} 条规则</span
+                  ><span class="mini-dot primary-dot"></span>已启用 {{ enabledCount }} 条规则</span
                 >
                 <div class="rule-main-actions">
                   <button
