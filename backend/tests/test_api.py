@@ -165,3 +165,59 @@ def test_restart_marks_interrupted_tasks_and_does_not_reseed(client):
     store.initialize()
     assert len(client.get("/api/datasets").json()) == count_before
     assert client.get("/api/tasks/interrupted").json()["status"] == "failed"
+
+
+def test_dataset_delete_restore_preserves_source_and_history(client):
+    identity = upload_csv(client, "编号,姓名\n001, 测试 \n").json()["id"]
+    body = {"rules": [{"id": "trim", "type": "trim"}]}
+    task_id = client.post(f"/api/datasets/{identity}/tasks", json=body).json()["id"]
+    source = (store.ROOT / "datasets" / f"{identity}.json").read_bytes()
+    assert client.delete(f"/api/datasets/{identity}").status_code == 204
+    assert identity not in [r["id"] for r in client.get("/api/datasets").json()]
+    trashed = client.get("/api/datasets?deleted=true").json()
+    assert [r["id"] for r in trashed] == [identity]
+    assert trashed[0]["deleted_at"]
+    assert client.get(f"/api/datasets/{identity}").json()["total"] == 1
+    assert client.post(f"/api/datasets/{identity}/preview", json=body).status_code == 409
+    assert client.post(f"/api/datasets/{identity}/tasks", json=body).status_code == 409
+    assert client.get(f"/api/tasks/{task_id}").json()["status"] == "success"
+    assert client.get(f"/api/tasks/{task_id}/result").json()["items"][0]["姓名"] == "测试"
+    assert client.get(f"/api/tasks/{task_id}/export").status_code == 200
+    assert client.get(f"/api/tasks/{task_id}/export?kind=report").status_code == 200
+    assert (store.ROOT / "datasets" / f"{identity}.json").read_bytes() == source
+    store.initialize()
+    assert identity not in [r["id"] for r in client.get("/api/datasets").json()]
+    assert client.post(f"/api/datasets/{identity}/restore").status_code == 204
+    assert client.get("/api/datasets?deleted=true").json() == []
+    assert identity in [r["id"] for r in client.get("/api/datasets").json()]
+    assert client.post(f"/api/datasets/{identity}/preview", json=body).status_code == 200
+    assert client.post(f"/api/datasets/{identity}/restore").status_code == 404
+    assert client.delete("/api/datasets/missing").status_code == 404
+
+
+@pytest.mark.parametrize("status", ["pending", "running"])
+def test_dataset_delete_blocks_active_tasks(client, status):
+    identity = upload_csv(client, "姓名\n测试\n").json()["id"]
+    store.query("INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?,?)", ("active-task", "运行任务", identity, "客户.csv", status, store.now(), None, "[]", None, None))
+    assert client.delete(f"/api/datasets/{identity}").status_code == 409
+    assert identity in [r["id"] for r in client.get("/api/datasets").json()]
+    assert client.get("/api/datasets?deleted=true").json() == []
+
+
+def test_dataset_migration_keeps_existing_files_and_supports_new_imports(tmp_path, monkeypatch):
+    import sqlite3
+
+    monkeypatch.setattr(store, "ROOT", tmp_path)
+    (tmp_path / "datasets").mkdir()
+    (tmp_path / ".initialized").write_text("existing", encoding="utf-8")
+    with sqlite3.connect(tmp_path / "platform.sqlite3") as db:
+        db.execute("CREATE TABLE datasets (id TEXT PRIMARY KEY,name TEXT,row_count INTEGER,column_count INTEGER,created_at TEXT,source TEXT,columns_json TEXT)")
+        db.execute("INSERT INTO datasets VALUES (?,?,?,?,?,?,?)", ("existing", "旧数据.csv", 1, 1, store.now(), "import", '["姓名"]'))
+    store.write_json("datasets", "existing", {"columns": ["姓名"], "rows": [{"_row_id": 1, "姓名": "测试"}]})
+    before = (tmp_path / "datasets" / "existing.json").read_bytes()
+    store.initialize()
+    store.initialize()
+    assert store.query("SELECT * FROM datasets", one=True)["deleted_at"] is None
+    assert (tmp_path / "datasets" / "existing.json").read_bytes() == before
+    new_id = store.add_dataset("新数据.csv", ["姓名"], [{"_row_id": 1, "姓名": "新测试"}])
+    assert store.query("SELECT deleted_at FROM datasets WHERE id=?", (new_id,), one=True)["deleted_at"] is None

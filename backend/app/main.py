@@ -49,10 +49,12 @@ class TemplateRequest(RunRequest):
     description: str = Field(default="", max_length=500)
 
 
-def dataset_or_404(identity):
+def dataset_or_404(identity, allow_deleted=False):
     record = store.query("SELECT * FROM datasets WHERE id=?", (identity,), one=True)
     if not record:
         raise HTTPException(404, "数据集不存在")
+    if record["deleted_at"] and not allow_deleted:
+        raise HTTPException(409, "数据集已移入回收站，请恢复后再清洗")
     return record, store.read_json("datasets", identity)
 
 
@@ -67,19 +69,41 @@ def health():
 
 
 @app.get("/api/datasets")
-def datasets():
-    return [{**{k: v for k, v in d.items() if k != "columns_json"}, "columns": json.loads(d["columns_json"])} for d in store.query("SELECT * FROM datasets ORDER BY created_at DESC, rowid DESC")]
+def datasets(deleted: bool = False):
+    condition = "IS NOT NULL" if deleted else "IS NULL"
+    return [{**{k: v for k, v in d.items() if k != "columns_json"}, "columns": json.loads(d["columns_json"])} for d in store.query(f"SELECT * FROM datasets WHERE deleted_at {condition} ORDER BY created_at DESC, rowid DESC")]
+
+
+@app.delete("/api/datasets/{identity}", status_code=204)
+def delete_dataset(identity: str):
+    with store.connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        record = db.execute("SELECT id FROM datasets WHERE id=? AND deleted_at IS NULL", (identity,)).fetchone()
+        if not record:
+            raise HTTPException(404, "数据集不存在或已移入回收站")
+        active = db.execute("SELECT id FROM tasks WHERE dataset_id=? AND status IN ('pending','running') LIMIT 1", (identity,)).fetchone()
+        if active:
+            raise HTTPException(409, "此数据集有正在执行的任务，请完成后再删除")
+        db.execute("UPDATE datasets SET deleted_at=? WHERE id=?", (store.now(), identity))
+
+
+@app.post("/api/datasets/{identity}/restore", status_code=204)
+def restore_dataset(identity: str):
+    with store.connect() as db:
+        cursor = db.execute("UPDATE datasets SET deleted_at=NULL WHERE id=? AND deleted_at IS NOT NULL", (identity,))
+        if not cursor.rowcount:
+            raise HTTPException(404, "回收站中没有此数据集")
 
 
 @app.get("/api/datasets/{identity}")
 def dataset(identity: str, page: int = 1, page_size: int = 50, search: str = ""):
     if page < 1 or page_size < 1 or page_size > 200:
         raise HTTPException(400, "分页参数无效")
-    record, data = dataset_or_404(identity)
+    record, data = dataset_or_404(identity, allow_deleted=True)
     rows = data["rows"]
     if search:
         rows = [r for r in rows if any(search.casefold() in str(r.get(c, "")).casefold() for c in data["columns"])]
-    return {"id": identity, "name": record["name"], "columns": data["columns"], "rows": rows[(page - 1) * page_size:page * page_size],
+    return {**{k: v for k, v in record.items() if k != "columns_json"}, "columns": data["columns"], "rows": rows[(page - 1) * page_size:page * page_size],
             "total": len(rows), "quality": quality(data["rows"], data["columns"])}
 
 
@@ -199,7 +223,14 @@ def execute_task(identity, data, rules):
 def run(identity: str, request: RunRequest, background: BackgroundTasks):
     record, data, rules = prepared(identity, request)
     task_id = uuid4().hex
-    store.query("INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?,?)", (task_id, request.name, identity, record["name"], "pending", store.now(), None, json.dumps(rules, ensure_ascii=False), None, None))
+    # Serialize task submission with deletion so a concurrent request cannot start
+    # new work against a dataset that has just moved to the recycle bin.
+    with store.connect() as db:
+        db.execute("BEGIN IMMEDIATE")
+        active = db.execute("SELECT id FROM datasets WHERE id=? AND deleted_at IS NULL", (identity,)).fetchone()
+        if not active:
+            raise HTTPException(409, "数据集已移入回收站，请恢复后再清洗")
+        db.execute("INSERT INTO tasks VALUES (?,?,?,?,?,?,?,?,?,?)", (task_id, request.name, identity, record["name"], "pending", store.now(), None, json.dumps(rules, ensure_ascii=False), None, None))
     background.add_task(execute_task, task_id, data, rules)
     return {"id": task_id}
 

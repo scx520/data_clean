@@ -70,7 +70,7 @@ def read_preview(identity):
 def add_dataset(name, columns, rows, source="import"):
     identity = uuid4().hex
     write_json("datasets", identity, {"columns": columns, "rows": rows})
-    query("INSERT INTO datasets VALUES (?,?,?,?,?,?,?)", (identity, name, len(rows), len(columns), now(), source, json.dumps(columns, ensure_ascii=False)))
+    query("INSERT INTO datasets (id,name,row_count,column_count,created_at,source,columns_json) VALUES (?,?,?,?,?,?,?)", (identity, name, len(rows), len(columns), now(), source, json.dumps(columns, ensure_ascii=False)))
     return identity
 
 
@@ -82,7 +82,7 @@ def initialize():
         db.executescript("""
         CREATE TABLE IF NOT EXISTS datasets (
             id TEXT PRIMARY KEY, name TEXT, row_count INTEGER, column_count INTEGER,
-            created_at TEXT, source TEXT, columns_json TEXT);
+            created_at TEXT, source TEXT, columns_json TEXT, deleted_at TEXT);
         CREATE TABLE IF NOT EXISTS tasks (
             id TEXT PRIMARY KEY, name TEXT, dataset_id TEXT, dataset_name TEXT,
             status TEXT, created_at TEXT, finished_at TEXT, rules_json TEXT,
@@ -90,6 +90,8 @@ def initialize():
         CREATE TABLE IF NOT EXISTS templates (
             id TEXT PRIMARY KEY, name TEXT, description TEXT, rules_json TEXT, created_at TEXT);
         """)
+        if "deleted_at" not in {row[1] for row in db.execute("PRAGMA table_info(datasets)")}:
+            db.execute("ALTER TABLE datasets ADD COLUMN deleted_at TEXT")
         db.execute("UPDATE tasks SET status='failed', error='服务重启中断了任务，请重新执行' WHERE status IN ('pending','running')")
     # Only seed on the first launch. Demo data is always labelled as synthetic.
     marker = ROOT / ".initialized"

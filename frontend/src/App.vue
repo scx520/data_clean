@@ -105,6 +105,7 @@ const ruleTypes: { type: RuleType; title: string; description: string; category:
 ]
 const page = ref<Page>('workspace')
 const datasets = ref<Dataset[]>([]),
+  trashedDatasets = ref<Dataset[]>([]),
   tasks = ref<Task[]>([]),
   templates = ref<Template[]>([])
 const selectedId = ref(''),
@@ -137,13 +138,23 @@ const activeReport = ref<Task | null>(null),
   resultItems = ref<(Row | Change | Issue)[]>([]),
   resultTotal = ref(0)
 const fileInput = ref<HTMLInputElement | null>(null)
+const datasetView = ref<'active' | 'trash'>('active')
+const datasetToDelete = ref<Dataset | null>(null)
+const deletionTaskCount = computed(
+  () => tasks.value.filter((task) => task.dataset_id === datasetToDelete.value?.id).length,
+)
+const displayedDatasets = computed(() =>
+  datasetView.value === 'active' ? datasets.value : trashedDatasets.value,
+)
 let toastTimer: ReturnType<typeof setTimeout>,
   searchTimer: ReturnType<typeof setTimeout>,
   pollTimer: ReturnType<typeof setInterval> | undefined
 let dataRevision = 0,
   originalRevision = 0,
   resultRevision = 0
-const currentDataset = computed(() => datasets.value.find((d) => d.id === selectedId.value))
+const currentDataset = computed(() =>
+  [...datasets.value, ...trashedDatasets.value].find((d) => d.id === selectedId.value),
+)
 const title = computed(() => navigation.find((n) => n.id === page.value)?.label)
 const currentQuality = computed(() =>
   tab.value === 'original'
@@ -152,7 +163,9 @@ const currentQuality = computed(() =>
 )
 const enabledCount = computed(() => rules.value.filter((r) => r.enabled).length)
 const successfulTasks = computed(() => tasks.value.filter((t) => t.status === 'success'))
-const isRunning = computed(() => ['preview', 'run', 'upload'].includes(busy.value))
+const isRunning = computed(() =>
+  ['preview', 'run', 'upload', 'dataset-delete', 'dataset-restore'].includes(busy.value),
+)
 const hasResult = computed(() => !!preview.value || !!completedTask.value)
 const resultIsSaved = computed(() => !!completedTask.value)
 const visibleRows = computed(() =>
@@ -264,21 +277,53 @@ function toggleField(rule: Rule, field: string) {
 }
 
 async function refreshCollections() {
-  const [ds, ts, rs] = await Promise.all([
+  const [ds, ts, rs, deleted] = await Promise.all([
     api<Dataset[]>('/datasets'),
     api<Task[]>('/tasks'),
     api<Template[]>('/templates'),
+    api<Dataset[]>('/datasets?deleted=true'),
   ])
   datasets.value = ds
   tasks.value = ts
   templates.value = rs
+  trashedDatasets.value = deleted
+}
+async function deleteDataset() {
+  const dataset = datasetToDelete.value
+  if (!dataset || isRunning.value) return
+  busy.value = 'dataset-delete'
+  try {
+    await api(`/datasets/${dataset.id}`, { method: 'DELETE' })
+    datasetToDelete.value = null
+    await refreshCollections()
+    if (selectedId.value === dataset.id) await selectDataset(datasets.value[0]?.id || '')
+    notify('数据集已移入回收站，可随时恢复；历史任务与结果已保留')
+  } catch (error) {
+    notify(errorMessage(error), true)
+  } finally {
+    busy.value = ''
+  }
+}
+async function restoreDataset(dataset: Dataset) {
+  if (isRunning.value) return
+  busy.value = 'dataset-restore'
+  try {
+    await api(`/datasets/${dataset.id}/restore`, { method: 'POST' })
+    await refreshCollections()
+    if (!selectedId.value) await selectDataset(dataset.id)
+    notify(`已恢复「${dataset.name}」`)
+  } catch (error) {
+    notify(errorMessage(error), true)
+  } finally {
+    busy.value = ''
+  }
 }
 async function loadOriginal() {
   if (!selectedId.value) return
   const revision = ++originalRevision
   loading.value = true
   try {
-    const data = await api<{ rows: Row[]; columns: string[]; quality: Quality; total: number }>(
+    const data = await api<Dataset & { rows: Row[]; quality: Quality; total: number }>(
       `/datasets/${selectedId.value}?page=${pageNumber.value}&search=${encodeURIComponent(search.value)}`,
     )
     if (revision !== originalRevision) return
@@ -321,6 +366,8 @@ async function selectDataset(identity: string, retainRules = false) {
   preview.value = null
   completedTask.value = null
   resultItems.value = []
+  resultTotal.value = 0
+  rawTotal.value = 0
   originalQuality.value = null
   tab.value = 'original'
   pageNumber.value = 1
@@ -394,7 +441,7 @@ function onDrop(event: DragEvent) {
 }
 
 async function makePreview() {
-  if (!selectedId.value || isRunning.value) return
+  if (!selectedId.value || currentDataset.value?.deleted_at || isRunning.value) return
   busy.value = 'preview'
   const revision = dataRevision
   try {
@@ -416,7 +463,7 @@ async function makePreview() {
   }
 }
 async function runTask() {
-  if (!selectedId.value || isRunning.value) return
+  if (!selectedId.value || currentDataset.value?.deleted_at || isRunning.value) return
   busy.value = 'run'
   const revision = dataRevision
   try {
@@ -559,6 +606,7 @@ function keyboard(event: KeyboardEvent) {
     templateOpen.value = false
     helpOpen.value = false
     exportOpen.value = false
+    if (!isRunning.value) datasetToDelete.value = null
   }
 }
 watch(search, () => {
@@ -583,7 +631,7 @@ watch(
   { deep: true, flush: 'sync' },
 )
 watch(page, () => {
-  if (page.value === 'tasks' || page.value === 'reports')
+  if (page.value === 'tasks' || page.value === 'reports' || page.value === 'datasets')
     void refreshCollections().catch((error) => notify(errorMessage(error), true))
 })
 onMounted(async () => {
@@ -770,7 +818,12 @@ onUnmounted(() => {
                     :disabled="isRunning"
                     @change="selectDataset(($event.target as HTMLSelectElement).value)"
                   >
-                    <option v-if="!datasets.length" value="">请先导入数据</option>
+                    <option v-if="currentDataset?.deleted_at" :value="currentDataset.id">
+                      已删除 · {{ currentDataset.name }}
+                    </option>
+                    <option v-if="!datasets.length && !currentDataset" value="">
+                      请先导入数据
+                    </option>
                     <option v-for="dataset in datasets" :key="dataset.id" :value="dataset.id">
                       {{ dataset.name }}
                     </option>
@@ -779,6 +832,18 @@ onUnmounted(() => {
                 <span class="file-type">{{
                   currentDataset?.name.split('.').pop()?.toUpperCase() || 'DATA'
                 }}</span>
+              </div>
+              <div v-if="currentDataset?.deleted_at" class="dataset-archived-notice">
+                <Info :size="15" /><span
+                  >此数据集已移入回收站。历史结果仍可查看和导出，恢复后可继续清洗。</span
+                >
+                <button
+                  class="text-button"
+                  :disabled="isRunning"
+                  @click="restoreDataset(currentDataset)"
+                >
+                  恢复数据集
+                </button>
               </div>
               <div class="table-toolbar">
                 <div class="tabs">
@@ -1213,7 +1278,9 @@ onUnmounted(() => {
                 <div class="rule-main-actions">
                   <button
                     class="button"
-                    :disabled="!selectedId || !enabledCount || isRunning"
+                    :disabled="
+                      !selectedId || !!currentDataset?.deleted_at || !enabledCount || isRunning
+                    "
                     @click="makePreview"
                   >
                     <LoaderCircle v-if="busy === 'preview'" :size="15" class="spinning" /><Search
@@ -1222,7 +1289,9 @@ onUnmounted(() => {
                     />预览效果</button
                   ><button
                     class="button primary"
-                    :disabled="!selectedId || !enabledCount || isRunning"
+                    :disabled="
+                      !selectedId || !!currentDataset?.deleted_at || !enabledCount || isRunning
+                    "
                     @click="runTask"
                   >
                     <LoaderCircle v-if="busy === 'run'" :size="15" class="spinning" /><Play
@@ -1261,19 +1330,41 @@ onUnmounted(() => {
 
         <template v-else-if="page === 'datasets'"
           ><div class="section-toolbar">
-            <h2>
-              全部数据集 <span class="subtle-tag">{{ datasets.length }}</span>
-            </h2>
-            <span class="muted">原始文件内容独立保存，清洗结果关联任务管理</span>
+            <div class="dataset-view-tabs" role="tablist" aria-label="数据集列表">
+              <button
+                role="tab"
+                :aria-selected="datasetView === 'active'"
+                :class="{ selected: datasetView === 'active' }"
+                @click="datasetView = 'active'"
+              >
+                全部数据集 <span class="subtle-tag">{{ datasets.length }}</span>
+              </button>
+              <button
+                role="tab"
+                :aria-selected="datasetView === 'trash'"
+                :class="{ selected: datasetView === 'trash' }"
+                @click="datasetView = 'trash'"
+              >
+                <Trash2 :size="14" />回收站
+                <span class="subtle-tag">{{ trashedDatasets.length }}</span>
+              </button>
+            </div>
+            <span class="muted">删除后可从回收站恢复，关联历史任务与结果保留</span>
           </div>
           <div class="dataset-grid">
-            <article v-for="dataset in datasets" :key="dataset.id" class="panel dataset-card">
+            <article
+              v-for="dataset in displayedDatasets"
+              :key="dataset.id"
+              class="panel dataset-card"
+            >
               <div class="dataset-card-top">
                 <span class="large-file-icon"><FileSpreadsheet :size="28" /></span
                 ><span class="subtle-tag">{{
-                  dataset.source === 'demo'
-                    ? '模拟数据'
-                    : dataset.name.split('.').pop()?.toUpperCase()
+                  dataset.deleted_at
+                    ? '已删除'
+                    : dataset.source === 'demo'
+                      ? '模拟数据'
+                      : dataset.name.split('.').pop()?.toUpperCase()
                 }}</span>
               </div>
               <h3>{{ dataset.name }}</h3>
@@ -1286,18 +1377,53 @@ onUnmounted(() => {
                 ><span v-if="dataset.columns.length > 4">+{{ dataset.columns.length - 4 }}</span>
               </div>
               <div class="dataset-card-bottom">
-                <span>{{ date(dataset.created_at) }} 导入</span
-                ><button class="text-button" @click="openDataset(dataset.id)">
-                  开始清洗<ArrowRight :size="14" />
-                </button>
+                <span
+                  >{{ date(dataset.deleted_at || dataset.created_at) }}
+                  {{ dataset.deleted_at ? '删除' : '导入' }}</span
+                >
+                <div class="dataset-card-actions">
+                  <button
+                    v-if="dataset.deleted_at"
+                    class="text-button"
+                    :disabled="isRunning"
+                    @click="restoreDataset(dataset)"
+                  >
+                    <RefreshCw :size="14" />恢复
+                  </button>
+                  <template v-else>
+                    <button
+                      class="text-button"
+                      :disabled="isRunning"
+                      @click="openDataset(dataset.id)"
+                    >
+                      开始清洗<ArrowRight :size="14" />
+                    </button>
+                    <button
+                      class="text-button danger-text"
+                      :disabled="isRunning"
+                      :aria-label="`删除数据集 ${dataset.name}`"
+                      @click="datasetToDelete = dataset"
+                    >
+                      <Trash2 :size="14" />删除
+                    </button>
+                  </template>
+                </div>
               </div>
             </article>
-            <button class="dataset-add-card" @click="uploadOpen = true">
+            <button
+              v-if="datasetView === 'active'"
+              class="dataset-add-card"
+              @click="uploadOpen = true"
+            >
               <span><Plus :size="24" /></span><strong>导入新的数据集</strong
               ><small>CSV 或 Excel，最大 20 MB</small>
             </button>
-          </div></template
-        >
+          </div>
+          <div v-if="datasetView === 'trash' && !trashedDatasets.length" class="panel empty-state">
+            <Trash2 :size="36" /><strong>回收站是空的</strong>
+            <p>删除的数据集会出现在这里，可以随时恢复。</p>
+          </div>
+        </template>
 
         <template v-else-if="page === 'tasks'"
           ><section class="panel">
@@ -1590,6 +1716,45 @@ onUnmounted(() => {
         </button></div
     ></Transition>
 
+    <div
+      v-if="datasetToDelete"
+      class="modal-overlay"
+      @click.self="!isRunning && (datasetToDelete = null)"
+    >
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="delete-dataset-title">
+        <header>
+          <span class="modal-icon"><Trash2 :size="22" /></span
+          ><button
+            class="icon-button"
+            :disabled="isRunning"
+            aria-label="关闭删除窗口"
+            @click="datasetToDelete = null"
+          >
+            <X :size="20" />
+          </button>
+        </header>
+        <h2 id="delete-dataset-title">删除数据集？</h2>
+        <p>「{{ datasetToDelete.name }}」将移入回收站，可随时恢复。</p>
+        <div class="delete-dataset-facts">
+          <FileSpreadsheet :size="20" />
+          <div>
+            <strong
+              >{{ number(datasetToDelete.row_count) }} 行 ·
+              {{ datasetToDelete.column_count }} 个字段</strong
+            ><span>关联 {{ deletionTaskCount }} 条任务，历史记录与清洗结果继续保留。</span>
+          </div>
+        </div>
+        <footer>
+          <button class="button" :disabled="isRunning" @click="datasetToDelete = null">取消</button
+          ><button class="button danger-button" :disabled="isRunning" @click="deleteDataset">
+            <LoaderCircle v-if="busy === 'dataset-delete'" :size="15" class="spinning" /><Trash2
+              v-else
+              :size="15"
+            />确认删除
+          </button>
+        </footer>
+      </section>
+    </div>
     <div v-if="uploadOpen" class="modal-overlay" @click.self="!isRunning && (uploadOpen = false)">
       <section class="modal" role="dialog" aria-modal="true" aria-labelledby="upload-title">
         <header>

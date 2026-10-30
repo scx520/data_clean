@@ -14,6 +14,7 @@ export interface Dataset {
   created_at: string
   source: string
   columns: string[]
+  deleted_at: string | null
 }
 export interface Quality {
   rows: number

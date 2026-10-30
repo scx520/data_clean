@@ -1304,6 +1304,81 @@ small {
   font-size: 13px;
   font-weight: 500;
 }
+.dataset-view-tabs {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+.dataset-view-tabs > button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 0;
+  font-size: 11px;
+  color: #8b9dab;
+  border-bottom: 2px solid transparent;
+}
+.dataset-view-tabs > button.selected {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+.dataset-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.text-button.danger-text {
+  color: #b47870;
+}
+.text-button.danger-text:hover:enabled {
+  color: #ba4e40;
+}
+.button.danger-button {
+  background: #c75f50;
+  border-color: #c75f50;
+  color: #fff;
+}
+.button.danger-button:hover:enabled {
+  background: #b24c3e;
+  border-color: #b24c3e;
+}
+.delete-dataset-facts {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #f4f8fb;
+  border: 1px solid #e4edf4;
+  padding: 15px;
+  border-radius: 7px;
+  color: #7a98af;
+}
+.delete-dataset-facts strong {
+  display: block;
+  font-size: 11px;
+  font-weight: 500;
+}
+.delete-dataset-facts span {
+  display: block;
+  font-size: 10px;
+  margin-top: 9px;
+  color: #95a9b8;
+  line-height: 1.8;
+}
+.dataset-archived-notice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 17px;
+  background: #fff9ed;
+  color: #ad925f;
+  font-size: 10px;
+  line-height: 1.8;
+}
+.dataset-archived-notice > span {
+  flex: 1;
+  min-width: 140px;
+}
 .section-toolbar > .muted {
   font-size: 10px;
 }
