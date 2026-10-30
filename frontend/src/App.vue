@@ -43,6 +43,7 @@ import {
   X,
 } from 'lucide-vue-next'
 import { api, download } from './api'
+import ClusterReport from './components/ClusterReport.vue'
 import type {
   Change,
   Dataset,
@@ -65,6 +66,12 @@ const navigation = [
   { id: 'reports' as Page, label: '质量报告', icon: FileCheck2 },
 ]
 const ruleTypes: { type: RuleType; title: string; description: string; category: string }[] = [
+  {
+    type: 'cluster',
+    title: '聚类分析',
+    description: '按数值或中文文本相似度分组，新增分组标签',
+    category: 'AI 分析',
+  },
   {
     type: 'trim',
     title: '去除首尾空格',
@@ -111,6 +118,10 @@ const datasets = ref<Dataset[]>([]),
 const selectedId = ref(''),
   rawRows = ref<Row[]>([]),
   columns = ref<string[]>([])
+const resultColumns = ref<string[]>([])
+const tableColumns = computed(() =>
+  tab.value === 'original' ? columns.value : resultColumns.value,
+)
 const originalQuality = ref<Quality | null>(null),
   rawTotal = ref(0)
 const rules = ref<Rule[]>([]),
@@ -185,7 +196,14 @@ const resultSummary = computed(() => completedTask.value?.summary || preview.val
 const removedRowCount = computed(() =>
   resultSummary.value ? resultSummary.value.before.rows - resultSummary.value.after.rows : 0,
 )
-const modifiedCellCount = computed(() => changeCount.value - removedRowCount.value)
+const annotatedCellCount = computed(
+  () =>
+    resultSummary.value?.rule_stats.reduce((sum, stat) => sum + (stat.annotated_cells || 0), 0) ||
+    0,
+)
+const modifiedCellCount = computed(
+  () => changeCount.value - removedRowCount.value - annotatedCellCount.value,
+)
 function notify(text: string, error = false) {
   toast.value = { text, error }
   clearTimeout(toastTimer)
@@ -222,6 +240,22 @@ function ruleMeta(type: RuleType) {
 function newRule(type: RuleType): Rule {
   const fields = columns.value
   const preferred = (name: string) => (fields.includes(name) ? [name] : fields.slice(0, 1))
+  if (type === 'cluster') {
+    let output = '聚类分组'
+    let suffix = 2
+    const used = [
+      ...fields,
+      ...rules.value.filter((r) => r.type === 'cluster').map((r) => r.options.output),
+    ]
+    while (used.includes(output)) output = `聚类分组${suffix++}`
+    return {
+      id: crypto.randomUUID(),
+      type,
+      enabled: true,
+      fields: fields.includes('消费金额') ? ['消费金额'] : fields.slice(0, 1),
+      options: { mode: fields.includes('消费金额') ? 'numeric' : 'text', clusters: '3', output },
+    }
+  }
   return {
     id: crypto.randomUUID(),
     type,
@@ -346,11 +380,12 @@ async function loadResult() {
     const endpoint = completedTask.value
       ? `/tasks/${completedTask.value.id}/result`
       : `/previews/${preview.value!.preview_id}`
-    const data = await api<{ items: (Row | Change | Issue)[]; total: number }>(
+    const data = await api<{ items: (Row | Change | Issue)[]; total: number; columns: string[] }>(
       `${endpoint}?view=${view}&page=${pageNumber.value}&search=${encodeURIComponent(search.value)}`,
     )
     if (revision !== resultRevision) return
     resultItems.value = data.items
+    resultColumns.value = data.columns
     resultTotal.value = data.total
   } catch (error) {
     if (revision === resultRevision) notify(errorMessage(error), true)
@@ -366,6 +401,7 @@ async function selectDataset(identity: string, retainRules = false) {
   preview.value = null
   completedTask.value = null
   resultItems.value = []
+  resultColumns.value = []
   resultTotal.value = 0
   rawTotal.value = 0
   originalQuality.value = null
@@ -451,6 +487,7 @@ async function makePreview() {
     })
     if (revision !== dataRevision) return
     preview.value = result
+    resultColumns.value = result.columns
     completedTask.value = null
     setTab('preview')
     notify(
@@ -750,7 +787,13 @@ onUnmounted(() => {
                 >数据记录<span class="metric-icon blue"><Database :size="17" /></span
               ></span>
               <div class="metric-value">{{ number(currentQuality?.rows) }}<small>行</small></div>
-              <span class="metric-foot">{{ currentQuality?.columns || 0 }} 个数据字段</span>
+              <span class="metric-foot"
+                >{{ currentQuality?.columns || 0 }} 个原始字段<span
+                  v-if="tab !== 'original' && resultColumns.length > columns.length"
+                >
+                  · {{ resultColumns.length - columns.length }} 个分析字段</span
+                ></span
+              >
             </div>
             <div class="metric">
               <span class="metric-label"
@@ -915,7 +958,9 @@ onUnmounted(() => {
                   >
                   <span class="summary-detail"
                     >移除 {{ number(removedRowCount) }} 行 · 修改
-                    {{ number(modifiedCellCount) }} 个单元格</span
+                    {{ number(modifiedCellCount) }} 个单元格<span v-if="annotatedCellCount">
+                      · 新增 {{ number(annotatedCellCount) }} 个标签</span
+                    ></span
                   >
                 </div>
                 <p>
@@ -952,12 +997,16 @@ onUnmounted(() => {
                   </div>
                 </details>
               </div>
+              <ClusterReport
+                v-if="tab !== 'original' && resultSummary?.analyses?.length"
+                :analyses="resultSummary.analyses"
+              />
               <div class="table-container" :class="{ 'table-loading': loading }">
                 <table v-if="tab === 'original' || tab === 'preview'" class="data-table">
                   <thead>
                     <tr>
                       <th class="row-index">#</th>
-                      <th v-for="column in columns" :key="column">
+                      <th v-for="column in tableColumns" :key="column">
                         <span
                           >{{ column
                           }}<span class="column-type">{{
@@ -971,7 +1020,7 @@ onUnmounted(() => {
                     <tr v-for="row in visibleRows" :key="row._row_id">
                       <td class="row-index">{{ row._row_id }}</td>
                       <td
-                        v-for="column in columns"
+                        v-for="column in tableColumns"
                         :key="column"
                         :class="{ 'missing-cell': !String(row[column] ?? '').trim() }"
                       >
@@ -1159,6 +1208,47 @@ onUnmounted(() => {
                         <Check v-if="rule.fields.includes(field)" :size="11" />{{ field }}</button
                       ><span v-if="!columns.length" class="muted">导入数据后选择字段</span>
                     </div>
+                    <template v-if="rule.type === 'cluster'">
+                      <label class="field-label" :for="`cluster-mode-${rule.id}`">聚类方式</label>
+                      <select
+                        :id="`cluster-mode-${rule.id}`"
+                        v-model="rule.options.mode"
+                        class="form-input"
+                        :disabled="isRunning"
+                      >
+                        <option value="numeric">数值聚类 · 金额、次数等</option>
+                        <option value="text">中文文本聚类 · 名称、备注等</option>
+                      </select>
+                      <label class="field-label" :for="`cluster-count-${rule.id}`">分组数量</label>
+                      <select
+                        :id="`cluster-count-${rule.id}`"
+                        v-model="rule.options.clusters"
+                        class="form-input"
+                        :disabled="isRunning"
+                      >
+                        <option v-for="k in 11" :key="k + 1" :value="String(k + 1)">
+                          {{ k + 1 }} 组
+                        </option>
+                      </select>
+                      <label class="field-label" :for="`cluster-output-${rule.id}`"
+                        >新增分组字段名</label
+                      >
+                      <input
+                        :id="`cluster-output-${rule.id}`"
+                        v-model="rule.options.output"
+                        class="form-input"
+                        maxlength="40"
+                        :disabled="isRunning"
+                        placeholder="聚类分组"
+                      />
+                      <p class="config-hint">
+                        最多选择 20 个字段。{{
+                          rule.options.mode === 'numeric'
+                            ? '自动平衡不同数值字段的量纲，空值和非数值记录不参与。'
+                            : '按文字片段相似度分组，每字段取前 512 字；适合名称和短文本，不代表语义理解。'
+                        }}保留全部记录，新增标签并记录分组概况。
+                      </p>
+                    </template>
                     <template v-if="rule.type === 'fill'"
                       ><label class="field-label" :for="`fill-${rule.id}`">填充内容</label
                       ><input
@@ -1599,6 +1689,10 @@ onUnmounted(() => {
                   <small>满分 100 · 格式异常另行列示</small>
                 </div>
               </div>
+              <ClusterReport
+                v-if="report.summary?.analyses?.length"
+                :analyses="report.summary.analyses"
+              />
               <div class="report-metrics">
                 <div class="panel report-stat">
                   <span>数据记录</span

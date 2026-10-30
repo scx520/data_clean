@@ -1,4 +1,12 @@
-export type RuleType = 'trim' | 'fill' | 'dedupe' | 'replace' | 'case' | 'convert' | 'validate'
+export type RuleType =
+  | 'trim'
+  | 'fill'
+  | 'dedupe'
+  | 'replace'
+  | 'case'
+  | 'convert'
+  | 'validate'
+  | 'cluster'
 export interface Rule {
   id: string
   type: RuleType
@@ -50,6 +58,26 @@ export interface RuleStat {
   issues: number
   fields?: string[]
   removed_rows?: number
+  annotated_cells?: number
+}
+export interface ClusterAnalysis {
+  rule_index: number
+  mode: 'numeric' | 'text'
+  algorithm: string
+  fields: string[]
+  output: string
+  clusters: number
+  participating_rows: number
+  excluded_rows: number
+  note: string
+  groups: {
+    label: string
+    count: number
+    share: number
+    means?: Record<string, number>
+    keywords?: string[]
+    examples?: string[]
+  }[]
 }
 export interface Result {
   preview_id: string
@@ -62,6 +90,7 @@ export interface Result {
   rule_stats: RuleStat[]
   total_changes: number
   total_issues: number
+  analyses?: ClusterAnalysis[]
 }
 export interface Task {
   id: string
@@ -79,6 +108,7 @@ export interface Task {
     changes: number
     issues: number
     rule_stats: RuleStat[]
+    analyses?: ClusterAnalysis[]
   } | null
 }
 export interface Template {

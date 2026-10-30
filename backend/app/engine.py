@@ -8,11 +8,12 @@ from datetime import datetime
 from typing import Any
 
 import pandas as pd
+from .analysis import cluster_rows, validate_cluster
 
 RULE_NAMES = {
     "trim": "去除首尾空格", "fill": "填充缺失值", "dedupe": "去除重复记录",
     "replace": "文本替换", "case": "统一英文大小写", "convert": "转换字段格式",
-    "validate": "标记异常数据",
+    "validate": "标记异常数据", "cluster": "聚类分析",
 }
 
 
@@ -32,6 +33,7 @@ def quality(rows: list[dict], columns: list[str]) -> dict:
 
 
 def validate_rules(rules: list[dict], columns: list[str]) -> None:
+    available = list(columns)
     if len(rules) > 30:
         raise ValueError("每次最多配置 30 条规则")
     for rule in rules:
@@ -40,9 +42,12 @@ def validate_rules(rules: list[dict], columns: list[str]) -> None:
         if not rule.get("enabled", True):
             continue
         fields = rule.get("fields", [])
-        if any(f not in columns for f in fields):
+        if any(f not in available for f in fields):
             raise ValueError("规则包含不存在的字段，请重新选择")
         kind, options = rule["type"], rule.get("options", {})
+        if kind == "cluster":
+            _, _, output = validate_cluster(options, fields, available)
+            available.append(output)
         if kind in ("fill", "replace", "case", "convert", "validate") and not fields:
             raise ValueError(f"请为「{RULE_NAMES[kind]}」选择字段")
         if kind == "fill" and missing(options.get("value")):
@@ -59,18 +64,26 @@ def validate_rules(rules: list[dict], columns: list[str]) -> None:
 
 def clean(source: list[dict], columns: list[str], rules: list[dict]) -> dict:
     validate_rules(rules, columns)
+    original_columns = list(columns)
+    columns = list(columns)
     rows = [r.copy() for r in source]
-    changes, issues, rule_stats = [], [], []
+    changes, issues, rule_stats, analyses = [], [], [], []
     for index, rule in enumerate(rules):
         if not rule.get("enabled", True):
             continue
         kind = rule["type"]
-        fields = rule.get("fields") or columns
+        fields = rule.get("fields") or original_columns
         options = rule.get("options", {})
         start_changes, start_issues = len(changes), len(issues)
         start_rows = len(rows)
         name = RULE_NAMES[kind]
-        if kind == "dedupe":
+        if kind == "cluster":
+            output, annotations, excluded, report = cluster_rows(rows, columns, fields, options)
+            columns.append(output)
+            changes.extend(annotations)
+            issues.extend(excluded)
+            analyses.append({"rule_index": index + 1, **report})
+        elif kind == "dedupe":
             seen, kept = set(), []
             for row in rows:
                 key = tuple(str(row.get(c, "")) for c in fields)
@@ -115,7 +128,9 @@ def clean(source: list[dict], columns: list[str], rules: list[dict]) -> dict:
                         changes.append({"row_id": row["_row_id"], "field": field, "before": before, "after": after, "rule": name, "action": "update"})
         rule_stats.append({"index": index + 1, "name": name, "fields": list(fields),
                            "changes": len(changes) - start_changes, "issues": len(issues) - start_issues,
-                           "removed_rows": start_rows - len(rows)})
+                           "removed_rows": start_rows - len(rows),
+                           "annotated_cells": len(rows) if kind == "cluster" else 0})
     return {"rows": rows, "columns": columns, "changes": changes, "issues": issues,
-            "before": quality(source, columns), "after": quality(rows, columns), "rule_stats": rule_stats,
+            "before": quality(source, original_columns), "after": quality(rows, original_columns), "rule_stats": rule_stats,
+            "analyses": analyses,
             "executed_at": datetime.now().astimezone().isoformat()}

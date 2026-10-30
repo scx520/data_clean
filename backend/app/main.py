@@ -34,7 +34,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http
 class Rule(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(max_length=100)
-    type: Literal["trim", "fill", "dedupe", "replace", "case", "convert", "validate"]
+    type: Literal["trim", "fill", "dedupe", "replace", "case", "convert", "validate", "cluster"]
     enabled: bool = True
     fields: list[str] = Field(default_factory=list, max_length=200)
     options: dict[str, str] = Field(default_factory=dict)
@@ -180,7 +180,10 @@ def prepared(identity, request):
 @app.post("/api/datasets/{identity}/preview")
 def preview(identity: str, request: RunRequest):
     _, data, rules = prepared(identity, request)
-    result = clean(data["rows"], data["columns"], rules)
+    try:
+        result = clean(data["rows"], data["columns"], rules)
+    except ValueError as error:
+        raise HTTPException(400, str(error)) from error
     preview_id = store.save_preview(result)
     return {**result, "preview_id": preview_id, "rows": result["rows"][:200], "changes": result["changes"][:500], "issues": result["issues"][:500],
             "total_changes": len(result["changes"]), "total_issues": len(result["issues"])}
@@ -211,8 +214,10 @@ def execute_task(identity, data, rules):
         store.query("UPDATE tasks SET status='running' WHERE id=?", (identity,))
         result = clean(data["rows"], data["columns"], rules)
         store.write_json("results", identity, result)
-        summary = {"before": result["before"], "after": result["after"], "changes": len(result["changes"]), "issues": len(result["issues"]), "rule_stats": result["rule_stats"]}
+        summary = {"before": result["before"], "after": result["after"], "changes": len(result["changes"]), "issues": len(result["issues"]), "rule_stats": result["rule_stats"], "analyses": result.get("analyses", [])}
         store.query("UPDATE tasks SET status='success', finished_at=?, summary_json=? WHERE id=?", (store.now(), json.dumps(summary, ensure_ascii=False), identity))
+    except ValueError as error:
+        store.query("UPDATE tasks SET status='failed', finished_at=?, error=? WHERE id=?", (store.now(), str(error), identity))
     except Exception:
         store.query("UPDATE tasks SET status='failed', finished_at=?, error=? WHERE id=?", (store.now(), "执行失败，请检查数据和规则后重试", identity))
         import logging
@@ -279,7 +284,7 @@ def export(identity: str, kind: Literal["data", "changes", "issues", "report"] =
         raise HTTPException(409, "任务尚未成功完成")
     result = store.read_json("results", identity)
     if kind == "report":
-        report = {"软件": "通用数据清洗平台 V1.0", "任务": record, "质量统计": {"清洗前": result["before"], "清洗后": result["after"]}, "规则统计": result["rule_stats"], "说明": "质量评分根据缺失单元格和整行重复记录计算，格式异常单独列示。"}
+        report = {"软件": "通用数据清洗平台 V1.0", "任务": record, "质量统计": {"清洗前": result["before"], "清洗后": result["after"]}, "规则统计": result["rule_stats"], "聚类分析": result.get("analyses", []), "说明": "质量评分根据原始字段的缺失单元格和整行重复记录计算，新增分析字段不参与评分；格式异常单独列示。"}
         return StreamingResponse(iter([json.dumps(report, ensure_ascii=False, indent=2)]), media_type="application/json", headers={"Content-Disposition": 'attachment; filename="quality-report.json"'})
     key = {"data": "rows", "changes": "changes", "issues": "issues"}[kind]
     columns = result["columns"] if kind == "data" else (["row_id", "field", "before", "after", "rule", "action"] if kind == "changes" else ["row_id", "field", "value", "rule", "reason"])

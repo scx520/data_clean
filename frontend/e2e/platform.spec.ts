@@ -5,6 +5,7 @@ test('完整流程：预览、执行、导出、报告、模板和历史记录',
   page.on('pageerror', (error) => errors.push(error.message))
   await page.goto('/')
   await expect(page.getByText('服务已连接')).toBeVisible()
+  await page.locator('#dataset').selectOption({ label: '客户信息示例（模拟数据）.csv' })
   await expect(page.locator('.metric-value').first()).toContainText('52')
   await expect(page.locator('.data-table tbody tr')).toHaveCount(50)
   await page.screenshot({ path: 'artifacts/workbench.png', fullPage: true, animations: 'disabled' })

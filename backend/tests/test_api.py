@@ -221,3 +221,37 @@ def test_dataset_migration_keeps_existing_files_and_supports_new_imports(tmp_pat
     assert (tmp_path / "datasets" / "existing.json").read_bytes() == before
     new_id = store.add_dataset("新数据.csv", ["姓名"], [{"_row_id": 1, "姓名": "新测试"}])
     assert store.query("SELECT deleted_at FROM datasets WHERE id=?", (new_id,), one=True)["deleted_at"] is None
+
+
+def test_clustering_preview_task_report_and_export_are_consistent(client):
+    identity = upload_csv(client, "编号,金额\n001,10\n002,11\n003,12\n004,1000\n005,1001\n006,1002\n007,未知\n").json()["id"]
+    body = {"rules": [{"id": "cluster", "type": "cluster", "fields": ["金额"], "options": {"clusters": "2", "mode": "numeric", "output": "消费分组"}}]}
+    preview = client.post(f"/api/datasets/{identity}/preview", json=body)
+    assert preview.status_code == 200
+    preview = preview.json()
+    assert preview["columns"] == ["编号", "金额", "消费分组"]
+    assert preview["after"]["rows"] == 7
+    assert preview["analyses"][0]["excluded_rows"] == 1
+    assert client.get(f"/api/previews/{preview['preview_id']}").json()["columns"][-1] == "消费分组"
+    task_id = client.post(f"/api/datasets/{identity}/tasks", json=body).json()["id"]
+    task = client.get(f"/api/tasks/{task_id}").json()
+    assert task["status"] == "success"
+    assert task["summary"]["analyses"] == preview["analyses"]
+    assert client.get(f"/api/tasks/{task_id}/result").json()["items"] == preview["rows"]
+    assert client.get(f"/api/tasks/{task_id}/export?kind=report").json()["聚类分析"] == preview["analyses"]
+    exported = list(csv.reader(io.StringIO(client.get(f"/api/tasks/{task_id}/export").content.decode("utf-8-sig"))))
+    assert exported[0][-1] == "消费分组"
+    assert exported[-1][-1] == "未参与"
+    assert client.get(f"/api/datasets/{identity}").json()["columns"] == ["编号", "金额"]
+
+
+def test_clustering_insufficient_data_shows_helpful_preview_and_task_error(client):
+    identity = upload_csv(client, "金额\n10\n").json()["id"]
+    body = {"rules": [{"id": "cluster", "type": "cluster", "fields": ["金额"], "options": {"clusters": "3"}}]}
+    response = client.post(f"/api/datasets/{identity}/preview", json=body)
+    assert response.status_code == 400
+    assert "少于设置" in response.json()["detail"]
+    task_id = client.post(f"/api/datasets/{identity}/tasks", json=body).json()["id"]
+    task = client.get(f"/api/tasks/{task_id}").json()
+    assert task["status"] == "failed"
+    assert "少于设置" in task["error"]

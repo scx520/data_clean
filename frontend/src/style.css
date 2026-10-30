@@ -1862,6 +1862,124 @@ small {
   padding: 12px 17px;
   color: #52758f;
 }
+.cluster-report {
+  margin: 15px;
+  border: 1px solid #dcebf6;
+  background: #f8fbfe;
+  border-radius: 8px;
+  padding: 15px;
+  min-width: 0;
+}
+.cluster-report-heading,
+.cluster-totals {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--primary);
+}
+.cluster-report-heading h3 {
+  font-size: 12px;
+  font-weight: 600;
+}
+.cluster-report-heading > span {
+  margin-left: auto;
+  font-size: 10px;
+}
+.cluster-fields,
+.cluster-note {
+  font-size: 10px;
+  color: #839bad;
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+}
+.cluster-fields {
+  margin-top: 10px;
+}
+.cluster-totals {
+  margin: 10px 0 14px;
+  gap: 18px;
+  font-size: 10px;
+  color: #5d859e;
+}
+.cluster-totals > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.cluster-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  gap: 10px;
+  max-height: 350px;
+  overflow: auto;
+}
+.cluster-group {
+  padding: 12px;
+  background: #fff;
+  border: 1px solid #e4edf5;
+  border-radius: 6px;
+  min-width: 0;
+}
+.cluster-group header {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 10px;
+  color: #7d98aa;
+}
+.cluster-group strong {
+  color: #3c7b9f;
+  font-weight: 500;
+}
+.cluster-bar {
+  height: 5px;
+  background: #edf4fa;
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 10px 0;
+}
+.cluster-bar i {
+  display: block;
+  height: 100%;
+  background: var(--primary);
+  border-radius: 4px;
+}
+.cluster-means {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 9px;
+  color: #8a9fac;
+}
+.cluster-means b {
+  color: #5c7f95;
+  font-weight: 500;
+}
+.cluster-keywords {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.cluster-keywords span {
+  padding: 3px 5px;
+  background: #edf6fc;
+  color: #5d8aa7;
+  font-size: 9px;
+  border-radius: 3px;
+}
+.cluster-example {
+  font-size: 9px;
+  color: #92a6b3;
+  margin-top: 8px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.cluster-note {
+  font-size: 9px;
+  margin-top: 12px;
+}
 .result-summary-counts {
   display: flex;
   flex-wrap: wrap;
