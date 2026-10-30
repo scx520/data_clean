@@ -44,6 +44,7 @@ import {
 } from 'lucide-vue-next'
 import { api, download } from './api'
 import ClusterReport from './components/ClusterReport.vue'
+import FieldSelector from './components/FieldSelector.vue'
 import type {
   Change,
   Dataset,
@@ -304,12 +305,6 @@ function moveRule(index: number, direction: number) {
   const item = rules.value.splice(index, 1)[0]!
   rules.value.splice(other, 0, item)
 }
-function toggleField(rule: Rule, field: string) {
-  rule.fields = rule.fields.includes(field)
-    ? rule.fields.filter((f) => f !== field)
-    : [...rule.fields, field]
-}
-
 async function refreshCollections() {
   const [ds, ts, rs, deleted] = await Promise.all([
     api<Dataset[]>('/datasets'),
@@ -1172,7 +1167,13 @@ onUnmounted(() => {
                         >{{ ruleMeta(rule.type).title
                         }}<small
                           >{{ rule.enabled ? '已启用' : '已停用' }} ·
-                          {{ rule.fields.length ? rule.fields.join('、') : '全部字段' }}</small
+                          {{
+                            rule.fields.length
+                              ? rule.fields.join('、')
+                              : rule.type === 'trim' || rule.type === 'dedupe'
+                                ? '全部字段'
+                                : '请选择字段'
+                          }}</small
                         ></span
                       ><ChevronDown
                         :size="14"
@@ -1196,18 +1197,13 @@ onUnmounted(() => {
                         >不选则使用全部字段</span
                       ></label
                     >
-                    <div class="field-chips">
-                      <button
-                        v-for="field in columns"
-                        :key="field"
-                        :disabled="isRunning"
-                        :class="['field-chip', { chosen: rule.fields.includes(field) }]"
-                        :aria-pressed="rule.fields.includes(field)"
-                        @click="toggleField(rule, field)"
-                      >
-                        <Check v-if="rule.fields.includes(field)" :size="11" />{{ field }}</button
-                      ><span v-if="!columns.length" class="muted">导入数据后选择字段</span>
-                    </div>
+                    <FieldSelector
+                      v-model="rule.fields"
+                      :fields="columns"
+                      :disabled="isRunning"
+                      :empty-means-all="rule.type === 'trim' || rule.type === 'dedupe'"
+                      :max-fields="rule.type === 'cluster' ? 20 : undefined"
+                    />
                     <template v-if="rule.type === 'cluster'">
                       <label class="field-label" :for="`cluster-mode-${rule.id}`">聚类方式</label>
                       <select

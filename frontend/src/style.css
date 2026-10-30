@@ -1100,6 +1100,75 @@ small {
   gap: 5px;
   flex-wrap: wrap;
 }
+.field-search {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #dfe8ee;
+  background: #fff;
+  border-radius: 5px;
+  height: 29px;
+  padding: 0 7px;
+  color: #9aafbc;
+}
+.field-search input {
+  border: 0;
+  background: transparent;
+  width: 100%;
+  min-width: 0;
+  font-size: 9px;
+  color: #55768a;
+}
+.field-search input::placeholder {
+  color: #a9b8c2;
+}
+.field-selection-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin: 9px 0;
+}
+.field-selection-tools button {
+  font-size: 9px;
+  padding: 2px 0;
+  color: var(--primary);
+}
+.field-selection-tools button:hover:enabled {
+  text-decoration: underline;
+}
+.field-selection-tools > span {
+  margin-left: auto;
+  color: #a0b1bc;
+  font-size: 8px;
+}
+.field-selector .field-chips {
+  max-height: 180px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  padding: 2px;
+}
+.field-selection-summary {
+  font-size: 8px;
+  color: #829eaf;
+  line-height: 1.8;
+  margin-top: 8px;
+}
+.field-selection-summary span {
+  display: block;
+  color: #9eafbb;
+}
+.field-empty {
+  font-size: 9px;
+  color: #9eafbb;
+  padding: 5px 0;
+}
+.field-selection-error {
+  font-size: 9px;
+  color: #bd7f5a;
+  line-height: 1.8;
+  margin-top: 6px;
+}
 .field-chip {
   display: flex;
   align-items: center;
