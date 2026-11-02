@@ -722,7 +722,7 @@ onUnmounted(() => {
         <button class="help-link" @click="helpOpen = true">
           <CircleHelp :size="17" />使用指南<ArrowUpRight :size="15" />
         </button>
-        <div class="version">通用数据清洗平台 <span>V1.0</span></div>
+        <div class="version">智能数据清洗与质量分析平台 <span>V1.0</span></div>
       </div>
     </aside>
 
@@ -1791,7 +1791,7 @@ onUnmounted(() => {
         ></template>
 
         <footer class="page-footer">
-          <span>通用数据清洗平台 V1.0</span><span>让数据更干净，让工作更简单。</span>
+          <span>智能数据清洗与质量分析平台 V1.0</span><span>让数据更干净，让工作更简单。</span>
         </footer>
       </div>
     </main>

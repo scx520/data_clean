@@ -27,7 +27,7 @@ async def lifespan(app):
     yield
 
 
-app = FastAPI(title="通用数据清洗平台", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="智能数据清洗与质量分析平台", version="1.0.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"], allow_methods=["*"], allow_headers=["*"])
 
 
@@ -284,7 +284,7 @@ def export(identity: str, kind: Literal["data", "changes", "issues", "report"] =
         raise HTTPException(409, "任务尚未成功完成")
     result = store.read_json("results", identity)
     if kind == "report":
-        report = {"软件": "通用数据清洗平台 V1.0", "任务": record, "质量统计": {"清洗前": result["before"], "清洗后": result["after"]}, "规则统计": result["rule_stats"], "聚类分析": result.get("analyses", []), "说明": "质量评分根据原始字段的缺失单元格和整行重复记录计算，新增分析字段不参与评分；格式异常单独列示。"}
+        report = {"软件": "智能数据清洗与质量分析平台 V1.0", "任务": record, "质量统计": {"清洗前": result["before"], "清洗后": result["after"]}, "规则统计": result["rule_stats"], "聚类分析": result.get("analyses", []), "说明": "质量评分根据原始字段的缺失单元格和整行重复记录计算，新增分析字段不参与评分；格式异常单独列示。"}
         return StreamingResponse(iter([json.dumps(report, ensure_ascii=False, indent=2)]), media_type="application/json", headers={"Content-Disposition": 'attachment; filename="quality-report.json"'})
     key = {"data": "rows", "changes": "changes", "issues": "issues"}[kind]
     columns = result["columns"] if kind == "data" else (["row_id", "field", "before", "after", "rule", "action"] if kind == "changes" else ["row_id", "field", "value", "rule", "reason"])
